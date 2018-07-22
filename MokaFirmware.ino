@@ -28,10 +28,15 @@
 #define TEN  4.44
 #define TWELVE 5.32
 
+/* --- One Oz Cream Time --- */
+//TODO MEASURE
+#define CREAM 10
+
+
 
 /* --- RFID --- */
-//PN532_I2C pn532_i2c(Wire);
-//NfcAdapter nfc = NfcAdapter(pn532_i2c);
+PN532_I2C pn532_i2c(Wire);
+NfcAdapter nfc = NfcAdapter(pn532_i2c);
 
 /* --- Wifi --- */
 char ssid[] = "2.4MakeWifiGreatAgain";
@@ -94,21 +99,31 @@ void pump(int p, double seconds) {
   digitalWrite(pumps[p-1], LOW);
 }
 
-double calcPumpTime(int cream, int size) {
+double calcWaterPumpTime(int cream, int size) {
 
-  double pumpTime = 0;
+  double waterTime = 0;
   double percentCream = (double)cream;
   percentCream =/ 100;
   if (size == 6)
-    pumpTime  = SIX*(1-percentCream);
+    waterTime  = SIX*(1-percentCream);
   if (size == 8)
-    pumpTime  = EIGHT*(1-percentCream);
+    waterTime  = EIGHT*(1-percentCream);
   if (size == 10)
-    pumpTime  = TEN*(1-percentCream);
+    waterTime  = TEN*(1-percentCream);
   if (size == 12)
-    pumpTime  = TWELVE*(1-percentCream);
+    waterTime  = TWELVE*(1-percentCream);
 
-  return pumpTime;
+  return waterTime;
+
+}
+
+double calcCreamPumpTime(int cream, int size) {
+  double percentCream = (double)cream;
+  percentCream =/ 100;
+
+  double totalCream = percentCream*(double)size;
+
+  return totalCream;
 
 }
 
@@ -117,17 +132,22 @@ int checkPayment(){
 }
 
 void defaultCoffee(){
+  double waterTime = calcPumppumpTime(0, 8)
+
   step(1, 2);
-  pumpTime = calcPumppumpTime(0, 8)
-  delay(2000);
-  pump(1, pumpTime);
+  delay(1000);
+  pump(1, waterTime);
 }
 
 void customCoffee(int type, int size, int cream){
+  double waterTime = calcPumppumpTime(cream, size);
+  double creamTime = calcCreamPumpTime(cream, size);
+
   step(type, 2);
-  pumpTime = calcPumppumpTime(cream, size);
-  delay(2000);
-  pump(1, pumpTime);
+  delay(1000);
+  pump(1, waterTime);
+  delay(10000);
+  pump(2, creamTime)
 }
 
 /*----- Main Functions -----*/
@@ -170,26 +190,23 @@ void loop() {
   if(userID != ""){
     JsonObject& data = get("/coffee/" + userID);
     //JsonObject& data = get("/coffee/36B6597B");
-    //TODO error check for non found user.
+    //TODO how does this find a user but no default coffee?
     if(data != NULL){
       int cream = data["cream"];
       int size  = data["size"];
+      //TODO change type of type.
       String type = data["type"];
 
       if(checkPayment()){
+        turnOnRelay();
+        delay(10000);
         customCoffee(type, size, cream);
+        turnOffRelay();
       }
 
     }
-    else{
-      delay(5000);
-    }
-
-
   }
 
-
-
-
+  delay(10000);
   while(1);
 }
