@@ -1,4 +1,5 @@
 #include <ArduinoHttpClient.h>
+#include <Adafruit_NeoPixel.h>
 #include <WiFi101.h>
 #include <Wire.h>
 #include <PN532_I2C.h>
@@ -8,6 +9,9 @@
 
 
 /*----- Variable Setup -----*/
+/* --- Debug --- */
+#define DEBUG 1
+
 /* --- Motors --- */
 #define MOTOR1 5
 #define MOTOR2 4
@@ -18,13 +22,30 @@
 #define PUMP2 9
 #define PUMP3 10
 
+/* --- NeoPixel ---*/
+#define NEOPIXEL MOTOR3
+#define NUM_PIXELS 16
+
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_PIXELS, NEOPIXEL, NEO_GRB + NEO_KHZ800);
+
+#define RED strip.Color(50, 0, 0)
+#define GREEN strip.Color(0, 50, 0)
+#define BLUE strip.Color(0, 0, 50)
+#define PURPLE strip.Color(50, 0, 50)
+#define YELLOW strip.Color(50, 50, 0)
+#define BLACK strip.Color(0, 0, 0)
+
+/* --- Base Pump Times --- */
+#define CREAM_OZ 10
+#define WATER_OZ 1.9
+
 /* --- RFID --- */
-//PN532_I2C pn532_i2c(Wire);
-//NfcAdapter nfc = NfcAdapter(pn532_i2c);
+PN532_I2C pn532_i2c(Wire);
+NfcAdapter nfc = NfcAdapter(pn532_i2c);
 
 /* --- Wifi --- */
-char ssid[] = "2.4MakeWifiGreatAgain";
-char pass[] = "Charge123";
+char ssid[] = "Big Veech Mobile";
+char pass[] = "1111111111";
 
 char serverAddress[] = "avecchi.me";
 int port = 3000;
@@ -75,11 +96,101 @@ void pump(int p, double seconds) {
   digitalWrite(pumps[p-1], LOW);
 }
 
+int getMotor(String type) {
+  int motor = 0;
+  
+  if(type == "regular")
+    motor = 1;
+  else if(type == "hazelnut")
+    motor = 2;
+
+  return motor;
+}
+
+double calcCreamPumpTime(int cream) {
+  return CREAM_OZ * cream;
+}
+
+double calcWaterPumpTime(int cream, int size) {
+  return WATER_OZ * (size - cream);
+}
+
+void customCoffee(String type, int size, int cream) {
+  int motor = getMotor(type);
+  double waterTime = calcWaterPumpTime(cream, size);
+  double creamTime = calcCreamPumpTime(cream);
+
+  if(DEBUG)
+    Serial.println("Type: " + type + "\nSize: " + size + "\nCream: " + cream);
+
+  progress(0, PURPLE);
+  
+  step(motor, 2);
+  progress(20, PURPLE);
+  delay(1000);
+  
+  pump(1, waterTime);
+  progress(50, PURPLE);
+  delay(5000);
+
+  progress(80, PURPLE);
+  pump(2, creamTime);
+  progress(100, PURPLE);
+  delay(500);
+
+  blink(GREEN, 500);
+  delay(1000);
+  blink(YELLOW, 1000);
+  blink(YELLOW, 1000);
+}
+
+void colorWipe(uint32_t c, uint8_t wait) {
+  for(uint16_t i=0; i<strip.numPixels(); i++) {
+    strip.setPixelColor(i, c);
+    strip.show();
+    delay(wait);
+  }
+}
+
+void spinner(int c, int bg, int wait) {
+  for(int i = 0; i < strip.numPixels(); i++) {
+    colorWipe(bg, 0);
+    strip.setPixelColor(((i+3) % strip.numPixels()), c);
+    strip.setPixelColor(((i+2) % strip.numPixels()), c);
+    strip.setPixelColor(((i+1) % strip.numPixels()), c);
+    strip.setPixelColor(((i) % strip.numPixels()), c);
+    strip.show();
+    delay(wait);
+  }
+}
+
+void progress(double percent, int c) {
+  int pixels = ceil((double)strip.numPixels() * (percent / 100));
+
+  colorWipe(BLACK, 0);
+  for(int i = 0; i < pixels; i++) {
+    strip.setPixelColor(i, c);
+    strip.show();
+  }
+}
+
+void blink(int c, int wait) {
+  colorWipe(c, 0);
+  delay(wait);
+  colorWipe(BLACK, 0);
+  delay(wait);
+  colorWipe(c, 0);
+  delay(wait);
+  colorWipe(BLACK, 0);
+  delay(wait);
+}
 
 /*----- Main Functions -----*/
 void setup() {
-  Serial.begin(9600);
-  while(!Serial);
+  if(DEBUG) {
+    Serial.begin(9600);
+    while(!Serial);
+  }
   
   /*--- Pin Setup ---*/
   pinMode(MOTOR1, OUTPUT);
@@ -90,21 +201,56 @@ void setup() {
   pinMode(PUMP2, OUTPUT);
   pinMode(PUMP3, OUTPUT);
 
+  /*--- NeoPixel Setup ---*/
+  strip.begin();
+  strip.show();
+
   /*--- WiFi Setup ---*/
   while ( status != WL_CONNECTED) {
-    Serial.println("Attempting to connect to Network named: " + (String)ssid);
+    if(DEBUG)
+      Serial.println("Attempting to connect to Network named: " + (String)ssid);
+      
     status = WiFi.begin(ssid, pass);
+    spinner(BLUE, BLACK, 50);
   }
 
-  printWifiStatus();
+  colorWipe(GREEN, 50);
+
+  if(DEBUG)
+    printWifiStatus();
   
   /*--- RFID Setup ---*/
-  //nfc.begin();
+  nfc.begin();
 }
 
 void loop() {
-  JsonObject& data = get("/coffee/36B6597B");
-  int cream = data["cream"];
-  Serial.println(cream);
-  while(1);
+  if(DEBUG)
+    Serial.println("Waiting for tag...");
+    
+  spinner(YELLOW, PURPLE, 50);
+  
+  if (nfc.tagPresent(10)) {
+        NfcTag tag = nfc.read();
+        tag.print();
+        
+        colorWipe(GREEN, 50);
+        
+        JsonObject& data = get("/coffee/" + tag.getUidString());
+
+        if(data["error"]) {
+          if(DEBUG);
+            Serial.println("No cup found");
+
+          blink(RED, 500);
+        }
+
+        else {
+          String type = data["type"];
+          int size = data["size"];
+          int cream = data["cream"];
+          
+          customCoffee(type, size, cream);
+        }
+  }
+
 }
